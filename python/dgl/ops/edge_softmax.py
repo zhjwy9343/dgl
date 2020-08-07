@@ -42,9 +42,9 @@ def edge_softmax(graph, logits, eids=ALL, norm_by='dst'):
 
     Notes
     -----
-        * Input shape: :math:`(E, *, 1)` where * means any number of
+        * Input shape: :math:`(E, *)` where * means any number of
           additional dimensions, :math:`E` equals the length of eids.
-        * Return shape: :math:`(E, *, 1)`
+        * Return shape: :math:`(E, *)`
 
     Examples
     --------
