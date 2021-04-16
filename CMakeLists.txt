@@ -25,6 +25,8 @@ endif()
 dgl_option(USE_CUDA "Build with CUDA" OFF)
 dgl_option(USE_OPENMP "Build with OpenMP" ON)
 dgl_option(USE_AVX "Build with AVX optimization" ON)
+dgl_option(USE_FP16 "Build with fp16 support to enable mixed precision training" OFF)
+dgl_option(USE_TVM "Build with TVM kernels" OFF)
 dgl_option(BUILD_CPP_TEST "Build cpp unittest executables" OFF)
 dgl_option(LIBCXX_ENABLE_PARALLEL_ALGORITHMS "Enable the parallel algorithms library. This requires the PSTL to be available." OFF)
 dgl_option(USE_S3 "Build with S3 support" OFF)
@@ -51,17 +53,6 @@ if(USE_CUDA)
     cuda_include_directories(BEFORE "${CMAKE_SOURCE_DIR}/third_party/cub")
   endif()
 endif(USE_CUDA)
-
-# include directories
-include_directories("include")
-include_directories("third_party/dlpack/include")
-include_directories("third_party/METIS/include/")
-include_directories("third_party/dmlc-core/include")
-include_directories("third_party/minigun/minigun")
-include_directories("third_party/minigun/third_party/moderngpu/src")
-include_directories("third_party/phmap/")
-include_directories("third_party/xbyak/")
-include_directories("tensoradapter/include")
 
 # initial variables
 if(NOT MSVC)
@@ -111,12 +102,21 @@ if(USE_OPENMP)
     set(CMAKE_C_FLAGS "${OpenMP_C_FLAGS} ${CMAKE_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${OpenMP_CXX_FLAGS} ${CMAKE_CXX_FLAGS}")
   endif(OPENMP_FOUND)
+  message(STATUS "Build with OpenMP.")
 endif(USE_OPENMP)
 
 if(USE_AVX)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_AVX")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_AVX")
+  message(STATUS "Build with AVX optimization.")
 endif(USE_AVX)
+
+# Build with fp16 to support mixed precision training.
+if(USE_FP16)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_FP16")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FP16")
+  message(STATUS "Build with fp16 to support mixed precision training")
+endif(USE_FP16)
 
 # To compile METIS correct for DGL.
 if(MSVC)
@@ -165,6 +165,18 @@ else(USE_CUDA)
   add_library(dgl SHARED ${DGL_SRC})
 endif(USE_CUDA)
 
+# include directories
+target_include_directories(dgl PRIVATE "include")
+target_include_directories(dgl PRIVATE "third_party/dlpack/include")
+target_include_directories(dgl PRIVATE "third_party/dmlc-core/include")
+target_include_directories(dgl PRIVATE "third_party/minigun/minigun")
+target_include_directories(dgl PRIVATE "third_party/minigun/third_party/moderngpu/src")
+target_include_directories(dgl PRIVATE "third_party/phmap/")
+target_include_directories(dgl PRIVATE "third_party/xbyak/")
+target_include_directories(dgl PRIVATE "third_party/METIS/include/")
+target_include_directories(dgl PRIVATE "tensoradapter/include")
+target_include_directories(dgl PRIVATE "third_party/nanoflann/include")
+
 # For serialization
 if (USE_HDFS)
   option(DMLC_HDFS_SHARED "dgl has to build with dynamic hdfs library" ON)
@@ -178,9 +190,23 @@ if(NOT MSVC)
   set(GKLIB_PATH "${CMAKE_SOURCE_DIR}/third_party/METIS/GKlib")
   include(${GKLIB_PATH}/GKlibSystem.cmake)
   include_directories(${GKLIB_PATH})
+  include_directories("third_party/METIS/include/")
   add_subdirectory("third_party/METIS/libmetis/")
   list(APPEND DGL_LINKER_LIBS metis)
 endif(NOT MSVC)
+
+# Compile TVM Runtime and Featgraph
+# (NOTE) We compile a dynamic library called featgraph_runtime, which the DGL library links to.
+# Kernels are packed in a separate dynamic library called featgraph_kernels, which DGL
+# will load during runtime.
+if(USE_TVM)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_TVM")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_TVM")
+  target_include_directories(dgl PRIVATE "featgraph/include")
+  add_subdirectory("featgraph/")
+  list(APPEND DGL_LINKER_LIBS featgraph_runtime)
+  message(STATUS "Build with TVM runtime and featgraph kernels.")
+endif(USE_TVM)
 
 # support PARALLEL_ALGORITHMS
 if (LIBCXX_ENABLE_PARALLEL_ALGORITHMS)
@@ -238,6 +264,11 @@ if(BUILD_CPP_TEST)
   add_subdirectory(./third_party/googletest)
   enable_testing()
   include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
+  include_directories("include")
+  include_directories("third_party/dlpack/include")
+  include_directories("third_party/xbyak")
+  include_directories("third_party/dmlc-core/include")
+  include_directories("third_party/phmap")
   file(GLOB_RECURSE TEST_SRC_FILES ${PROJECT_SOURCE_DIR}/tests/cpp/*.cc)
   add_executable(runUnitTests ${TEST_SRC_FILES})
   target_link_libraries(runUnitTests gtest gtest_main)
